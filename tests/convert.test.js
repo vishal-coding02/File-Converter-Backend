@@ -1,7 +1,7 @@
 // tests/convert.test.js
 const request = require("supertest");
 const path = require("path");
-const { app } = require("../index");
+const app = require("../index");
 
 describe("Testing - Convert API", () => {
   it("should return 400 if no file is uploaded", async () => {
