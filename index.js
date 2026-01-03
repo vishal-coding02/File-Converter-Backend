@@ -5,12 +5,26 @@ const multer = require("multer");
 const fs = require("fs");
 const convertToPdf = require("docx-pdf");
 const PDFDocument = require("pdfkit");
+const path = require("path");
+
 const app = express();
 
-app.use(cors());
-app.use("/convert", express.static("convert"));
-app.use("/newPdf", express.static("newpdf"));
+app.use(
+  cors({
+    origin: ["http://localhost:3000"],
+    credentials: true,
+  })
+);
 app.use(express.json());
+
+const convertDir = path.join(__dirname, "convert");
+const pdfDir = path.join(__dirname, "newpdf");
+
+if (!fs.existsSync(convertDir)) fs.mkdirSync(convertDir);
+if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir);
+
+app.use("/newpdf", express.static(pdfDir));
+app.use("/convert", express.static(convertDir));
 
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -58,32 +72,53 @@ const storage = multer.diskStorage({
 
 const convert = multer({ storage: storage });
 
-app.post("/newPdf", convert.single("image"), (req, res) => {
-  const text = JSON.parse(req.body.text);
+app.post("/newPdf", convert.array("image"), (req, res) => {
+  const text =
+    typeof req.body.text === "string"
+      ? JSON.parse(req.body.text)
+      : req.body.text;
 
   if (!text.textContent) {
     return res.status(400).json({ error: "No content provided" });
   }
-  const imagePath = req.file?.path;
+
+  const images = req.files;
+
   const outputPath = `newpdf/generated_${Date.now()}.pdf`;
 
-  const doc = new PDFDocument();
+  const doc = new PDFDocument({ margin: 60 });
   const writeStream = fs.createWriteStream(outputPath);
 
   doc.pipe(writeStream);
-  if (imagePath) {
-    doc.image(imagePath, {
-      fit: [500, 400],
-      align: "center",
-      valign: "center",
+
+  // 2. Image handle karein: Agar image hai toh pehle add hogi
+  if (images && images.length > 0) {
+    images.forEach((img, index) => {
+      if (index !== 0) doc.addPage();
+      doc.image(img.path, {
+        fit: [500, 300],
+        align: "center",
+      });
+      doc.moveDown(2);
     });
   }
 
-  doc.font(text.textFont);
-  doc.text(text.textContent, { align: text.textAlign });
+  // 3. Font aur Text setup
+  doc.font(text.textFont).fontSize(12);
+
+  // PDFKit automatic page add karta hai agar hum width limit dein
+  doc.text(text.textContent, {
+    align: text.textAlign,
+    lineGap: 5, // Line spacing
+    paragraphGap: 10, // Paragraph ke beech gap
+    indent: 20, // Thodi si padding
+  });
+
   doc.end();
-  res.json({ filePath: `/${outputPath}` });
-  console.log("Newpdf created...");
+
+  writeStream.on("finish", () => {
+    res.json({ filePath: `/${outputPath}` });
+  });
 });
 
 app.post("/convert", convert.single("files"), (req, res) => {
@@ -91,12 +126,16 @@ app.post("/convert", convert.single("files"), (req, res) => {
     return res.status(400).send("File not found.");
   }
   console.log(req.file);
+
   const inputPath = req.file.path;
   console.log(inputPath);
+
   const targetFormat = req.body.convertFileType;
   console.log(targetFormat);
+
   const outputPath = `convert/output.${targetFormat}`;
   console.log(outputPath);
+
   const ext = req.file.originalname.split(".").pop().toLowerCase();
 
   if (targetFormat === "pdf" && ext == "docx") {
@@ -106,7 +145,9 @@ app.post("/convert", convert.single("files"), (req, res) => {
         return res.status(500).send("PDF conversion failed");
       } else {
         console.log("PDF Conversion done:", outputPath);
+
         res.json({ filePath: `/${outputPath}` });
+
         setTimeout(() => {
           deleteFiles(inputPath, outputPath);
         }, 10000);
@@ -163,8 +204,8 @@ app.post("/convert", convert.single("files"), (req, res) => {
   }
 });
 
-// app.listen(6100, () => {
-//   console.log("Server Started...");
-// });
+app.listen(6100, () => {
+  console.log("Server Started...");
+});
 
 module.exports = app;
